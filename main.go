@@ -18,33 +18,48 @@ func main() {
 	}
 	defer file.Close()
 
-	line := ""
-	printAndResetLine := func() {
+	ch := getLinesChannel(file)
+	for line := range ch {
 		fmt.Println("read:", line)
-		line = ""
 	}
+}
 
-	for {
-		readBytes := make([]byte, 8)
-		n, err := file.Read(readBytes)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			log.Fatalf("Error reading from file: %s", err)
+func getLinesChannel(f io.ReadCloser) <-chan string {
+	ch := make(chan string)
+
+	go func() {
+		defer f.Close()
+		defer close(ch)
+
+		line := ""
+		sendAndResetLine := func() {
+			ch <- line
+			line = ""
 		}
 
-		readContentString := string(readBytes[:n])
-		parts := strings.Split(readContentString, "\n")
-		for i, p := range parts {
-			line += p
-			if i < len(parts) - 1 {
-				printAndResetLine()
+		for {
+			buffer := make([]byte, 8)
+			n, err := f.Read(buffer)
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				log.Fatalf("Error reading from file: %s", err)
+			}
+
+			readContentString := string(buffer[:n])
+			parts := strings.Split(readContentString, "\n")
+			for i, p := range parts {
+				line += p
+				if i < len(parts) - 1 {
+					sendAndResetLine()
+				}
 			}
 		}
-	}
+		if line != "" {
+			sendAndResetLine()
+		}
+	}()
 
-	if line != "" {
-		printAndResetLine()
-	}
+	return ch
 }
