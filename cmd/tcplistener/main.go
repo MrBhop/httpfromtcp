@@ -1,12 +1,11 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"strings"
+
+	"github.com/MrBhop/httpfromtcp/internal/request"
 )
 
 const port = ":42069"
@@ -26,51 +25,19 @@ func main() {
 		}
 
 		fmt.Println("Connection accepted!")
-		ch := getLinesChannel(conn)
-		for line := range ch {
-			fmt.Println(line)
+
+
+		request, err := request.RequestFromReader(conn)
+		if err != nil {
+			log.Fatalf("Error parsing request: %s", err)
 		}
+
+		fmt.Println("Request line:")
+		fmt.Printf("- Method: %s\n", request.RequestLine.Method)
+		fmt.Printf("- Target: %s\n", request.RequestLine.RequestTarget)
+		fmt.Printf("- Version: %s\n", request.RequestLine.HttpVersion)
+
 
 		fmt.Println("Connection to", conn.RemoteAddr(), "closed!")
 	}
-}
-
-func getLinesChannel(f io.ReadCloser) <-chan string {
-	ch := make(chan string)
-
-	go func() {
-		defer f.Close()
-		defer close(ch)
-
-		line := ""
-		sendAndResetLine := func() {
-			ch <- line
-			line = ""
-		}
-
-		for {
-			buffer := make([]byte, 8)
-			n, err := f.Read(buffer)
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				log.Fatalf("Error reading from file: %s", err)
-			}
-
-			readContentString := string(buffer[:n])
-			parts := strings.Split(readContentString, "\n")
-			for i, p := range parts {
-				line += p
-				if i < len(parts) - 1 {
-					sendAndResetLine()
-				}
-			}
-		}
-		if line != "" {
-			sendAndResetLine()
-		}
-	}()
-
-	return ch
 }
