@@ -1,6 +1,7 @@
 package request
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -8,8 +9,15 @@ import (
 	"unicode"
 )
 
+type parserState int
+
+const (
+	initialized parserState = iota
+	done
+)
 
 type Request struct {
+	state parserState
 	RequestLine RequestLine
 }
 
@@ -19,32 +27,74 @@ type RequestLine struct {
 	Method string
 }
 
+const (
+	bufferLength int = 8
+	crlf string = "\r\n"
+)
+
 func RequestFromReader(reader io.Reader) (*Request, error) {
-	request, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, err
-	}
-	lines := strings.Split(string(request), "\r\n")
-	if length := len(lines); length < 2 {
-		return nil, fmt.Errorf("Request does not have enough lines. Expected > 2, got %d", length)
+	request := &Request{state: initialized}
+	buffer := make([]byte, bufferLength)
+	usedBufferLength := 0
+
+	for request.state != done {
+		if capacity := cap(buffer); usedBufferLength >= capacity {
+			newBuffer := make([]byte, capacity * 2)
+			copy(newBuffer, buffer)
+			buffer = newBuffer
+		}
+
+		n, err := reader.Read(buffer[usedBufferLength:])
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil, fmt.Errorf("Invalid request format - no crlf found")
+			}
+
+			return nil, err
+		}
+
+		usedBufferLength += n
+		n, err = request.parse(buffer[:usedBufferLength])
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	requestLine, err := parseRequestLine(lines[0])
-	if err != nil {
-		return nil, fmt.Errorf("Error parsing request-line: %w", err)
-	}
-
-	output := Request {
-		RequestLine: *requestLine,
-	}
-
-	return &output, nil
+	return request, nil
 }
 
-func parseRequestLine(line string) (*RequestLine, error) {
-	fields := strings.Fields(line)
+func (r *Request) parse(next []byte) (int, error) {
+	switch r.state {
+	case initialized:
+		n := strings.Index(string(next), crlf)
+		if n == -1 {
+			return 0, nil
+		}
+
+		n, requestLine, err := parseRequestLine(next)
+		if err != nil {
+			return 0, err
+		}
+		r.RequestLine = *requestLine
+		r.state = done
+		return n, nil
+	case done:
+		return 0, fmt.Errorf("Cannot parse in a done state")
+	default:
+		return 0, fmt.Errorf("Unknown state")
+	}
+}
+
+func parseRequestLine(line []byte) (int, *RequestLine, error) {
+	n := strings.Index(string(line), crlf)
+	if n == -1 {
+		return 0, nil, nil
+	}
+
+	lineString := string(line[:n])
+	fields := strings.Fields(lineString)
 	if length := len(fields); length != 3 {
-		return nil, fmt.Errorf("Request lines has incorrect number of whitespace delimited fields. Expected 3, got %d", length)
+		return 0, nil, fmt.Errorf("Request lines has incorrect number of whitespace delimited fields. Expected 3, got %d", length)
 	}
 
 	output := RequestLine {
@@ -54,12 +104,12 @@ func parseRequestLine(line string) (*RequestLine, error) {
 	// validate Method.
 	method := fields[0]
 	if upperCaseMethod := strings.ToUpper(method); upperCaseMethod != method {
-		return nil, fmt.Errorf("Method contains non uppercase characters.")
+		return 0, nil, fmt.Errorf("Method contains non uppercase characters.")
 	}
 
 	for _, r := range method {
 		if !unicode.IsLetter(r) {
-			return nil, fmt.Errorf("Method contains non alphabetic characters.")
+			return 0, nil, fmt.Errorf("Method contains non alphabetic characters.")
 		}
 	}
 
@@ -69,34 +119,33 @@ func parseRequestLine(line string) (*RequestLine, error) {
 	// general validation.
 	versionString := []byte(fields[2])
 	if length := len(versionString); length != 8 {
-		return nil, fmt.Errorf("HTTP-version is malformed. Expected length == 8, got %d", length)
+		return 0, nil, fmt.Errorf("HTTP-version is malformed. Expected length == 8, got %d", length)
 	}
 
 	if versionStart := string(versionString[:5]); versionStart != "HTTP/" {
-		return nil, fmt.Errorf("HTTP-version is malformed. Expected to start with HTTP/, got: '%s'", versionStart)
+		return 0, nil, fmt.Errorf("HTTP-version is malformed. Expected to start with HTTP/, got: '%s'", versionStart)
 	}
 
 	digit1 := string(versionString[5])
 	if _, err := strconv.Atoi(digit1); err != nil {
-		return nil, fmt.Errorf("HTTP-version is malformed. Expected 6th char to be digit, got: '%s'", digit1)
+		return 0, nil, fmt.Errorf("HTTP-version is malformed. Expected 6th char to be digit, got: '%s'", digit1)
 	}
 
 	if dot := string(versionString[6]); dot != "." {
-		return nil, fmt.Errorf("HTTP-version is malformed. Expected 7th chat to be '.', got: '%s'", dot)
+		return 0, nil, fmt.Errorf("HTTP-version is malformed. Expected 7th chat to be '.', got: '%s'", dot)
 	}
 	
 	digit2 := string(versionString[7])
 	if _, err := strconv.Atoi(digit2); err != nil {
-		return nil, fmt.Errorf("HTTP-version is malformed. Expected 8th char to be digit, got: '%s'", digit1)
+		return 0, nil, fmt.Errorf("HTTP-version is malformed. Expected 8th char to be digit, got: '%s'", digit1)
 	}
 
 	output.HttpVersion = digit1 + "." + digit2
 
 	// version specific validation.
 	if !(output.HttpVersion == "1.1") {
-		return nil, fmt.Errorf("This application only supports 1.1, got: %s", output.HttpVersion)
+		return 0, nil, fmt.Errorf("This application only supports 1.1, got: %s", output.HttpVersion)
 	}
 
-	return &output, nil
+	return n + 2, &output, nil
 }
-
