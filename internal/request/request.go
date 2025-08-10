@@ -17,6 +17,7 @@ type parserState int
 const (
 	requestStateParsingInitialized parserState = iota
 	requestStateParsingHeaders
+	requestStateParsingBody
 	requestStateParsingDone
 )
 
@@ -24,6 +25,7 @@ type Request struct {
 	state parserState
 	RequestLine RequestLine
 	Headers headers.Headers
+	Body []byte
 }
 
 type RequestLine struct {
@@ -36,6 +38,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	request := &Request{
 		state: requestStateParsingInitialized,
 		Headers: headers.NewHeaders(),
+		Body: make([]byte, 0),
 	}
 	buffer := make([]byte, constants.BufferLength)
 	usedBufferLength := 0
@@ -104,9 +107,31 @@ func (r *Request) parseSingle(next []byte) (int, error) {
 			return 0, err
 		}
 		if done {
-			r.state = requestStateParsingDone
+			r.state = requestStateParsingBody
 		}
 		return n, nil
+	case requestStateParsingBody:
+		contentLengthString, exists := r.Headers.Get("Content-Length")
+		if !exists {
+			r.state = requestStateParsingDone
+			return len(next), nil
+		}
+
+		contentLength, err := strconv.Atoi(contentLengthString)
+		if err != nil {
+			return 0, fmt.Errorf("Malformed Content-Length: %w", err)
+		}
+
+		r.Body = append(r.Body, next...)
+
+		if bodyLength := len(r.Body); bodyLength > contentLength {
+			return 0, fmt.Errorf("Mismatching content-length. Expected %d, got %d", contentLength, bodyLength)
+		}
+
+		if len(r.Body) == contentLength {
+			r.state = requestStateParsingDone
+		}
+		return len(next), nil
 	case requestStateParsingDone:
 		return 0, fmt.Errorf("Cannot parse in a done state")
 	default:
