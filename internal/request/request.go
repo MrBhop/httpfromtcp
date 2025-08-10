@@ -29,7 +29,7 @@ type RequestLine struct {
 
 const (
 	bufferLength int = 8
-	crlf string = "\r\n"
+	CrLf string = "\r\n"
 )
 
 func RequestFromReader(reader io.Reader) (*Request, error) {
@@ -66,7 +66,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 func (r *Request) parse(next []byte) (int, error) {
 	switch r.state {
 	case initialized:
-		n := strings.Index(string(next), crlf)
+		n := strings.Index(string(next), CrLf)
 		if n == -1 {
 			return 0, nil
 		}
@@ -86,7 +86,7 @@ func (r *Request) parse(next []byte) (int, error) {
 }
 
 func parseRequestLine(line []byte) (int, *RequestLine, error) {
-	n := strings.Index(string(line), crlf)
+	n := strings.Index(string(line), CrLf)
 	if n == -1 {
 		return 0, nil, nil
 	}
