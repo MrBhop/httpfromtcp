@@ -7,18 +7,23 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/MrBhop/httpfromtcp/internal/constants"
+	"github.com/MrBhop/httpfromtcp/internal/headers"
 )
 
 type parserState int
 
 const (
-	initialized parserState = iota
-	done
+	requestStateParsingInitialized parserState = iota
+	requestStateParsingHeaders
+	requestStateParsingDone
 )
 
 type Request struct {
 	state parserState
 	RequestLine RequestLine
+	Headers headers.Headers
 }
 
 type RequestLine struct {
@@ -27,24 +32,22 @@ type RequestLine struct {
 	Method string
 }
 
-const (
-	bufferLength int = 8
-	CrLf string = "\r\n"
-)
-
 func RequestFromReader(reader io.Reader) (*Request, error) {
-	request := &Request{state: initialized}
-	buffer := make([]byte, bufferLength)
+	request := &Request{
+		state: requestStateParsingInitialized,
+		Headers: headers.NewHeaders(),
+	}
+	buffer := make([]byte, constants.BufferLength)
 	usedBufferLength := 0
 
-	for request.state != done {
+	for request.state != requestStateParsingDone {
 		if capacity := cap(buffer); usedBufferLength >= capacity {
 			newBuffer := make([]byte, capacity * 2)
 			copy(newBuffer, buffer)
 			buffer = newBuffer
 		}
 
-		n, err := reader.Read(buffer[usedBufferLength:])
+		bytesRead, err := reader.Read(buffer[usedBufferLength:])
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil, fmt.Errorf("Invalid request format - no crlf found")
@@ -53,32 +56,58 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 			return nil, err
 		}
 
-		usedBufferLength += n
-		n, err = request.parse(buffer[:usedBufferLength])
+		usedBufferLength += bytesRead
+		bytesParsed, err := request.parse(buffer[:usedBufferLength])
 		if err != nil {
 			return nil, err
 		}
+
+		copy(buffer, buffer[bytesParsed:])
+		usedBufferLength -= bytesParsed
 	}
 
 	return request, nil
 }
 
 func (r *Request) parse(next []byte) (int, error) {
-	switch r.state {
-	case initialized:
-		n := strings.Index(string(next), CrLf)
-		if n == -1 {
-			return 0, nil
+	totalBytesParsed := 0
+	for r.state != requestStateParsingDone {
+		n, err := r.parseSingle(next[totalBytesParsed:])
+		if err != nil {
+			return totalBytesParsed, err
 		}
 
-		n, requestLine, err := parseRequestLine(next)
+		totalBytesParsed += n
+		if n == 0 {
+			break
+		}
+	}
+
+	return totalBytesParsed, nil
+}
+
+func (r *Request) parseSingle(next []byte) (int, error) {
+	switch r.state {
+	case requestStateParsingInitialized:
+		parsedBytes, requestLine, err := parseRequestLine(next)
 		if err != nil {
 			return 0, err
 		}
-		r.RequestLine = *requestLine
-		r.state = done
+		if parsedBytes > 0 {
+			r.RequestLine = *requestLine
+			r.state = requestStateParsingHeaders
+		}
+		return parsedBytes, nil
+	case requestStateParsingHeaders:
+		n, done, err := r.Headers.Parse(next)
+		if err != nil {
+			return 0, err
+		}
+		if done {
+			r.state = requestStateParsingDone
+		}
 		return n, nil
-	case done:
+	case requestStateParsingDone:
 		return 0, fmt.Errorf("Cannot parse in a done state")
 	default:
 		return 0, fmt.Errorf("Unknown state")
@@ -86,7 +115,7 @@ func (r *Request) parse(next []byte) (int, error) {
 }
 
 func parseRequestLine(line []byte) (int, *RequestLine, error) {
-	n := strings.Index(string(line), CrLf)
+	n := strings.Index(string(line), constants.CrLf)
 	if n == -1 {
 		return 0, nil, nil
 	}

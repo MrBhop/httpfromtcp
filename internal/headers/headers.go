@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/MrBhop/httpfromtcp/internal/request"
+	"github.com/MrBhop/httpfromtcp/internal/constants"
 )
 
 type Headers map[string]string
@@ -16,7 +16,7 @@ func NewHeaders() Headers {
 }
 
 func (h Headers) Parse(data []byte) (n int, done bool, err error) {
-	n = strings.Index(string(data), request.CrLf)
+	n = strings.Index(string(data), constants.CrLf)
 	switch n {
 	case -1:
 		return 0, false, nil
@@ -39,7 +39,7 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 
 	fieldValue := strings.TrimSpace(string(parts[1]))
 	if len(strings.Split(fieldValue, " ")) > 1 {
-		return 0, false, fmt.Errorf("Whitespace in the feld value is not allowed.")
+		return 0, false, fmt.Errorf("Whitespace in the field value is not allowed.")
 	}
 
 	if _, exists := h[key]; exists {
@@ -85,7 +85,7 @@ func validateHeaderKey(key string) error {
 			continue
 		}
 
-		return fmt.Errorf("Invalid character")
+		return fmt.Errorf("Invalid character, '%c'", r)
 	}
 
 	return nil
