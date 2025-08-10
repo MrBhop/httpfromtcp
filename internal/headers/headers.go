@@ -42,7 +42,11 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 		return 0, false, fmt.Errorf("Whitespace in the feld value is not allowed.")
 	}
 
-	h[key] = fieldValue
+	if _, exists := h[key]; exists {
+		h[key] += ", " + fieldValue
+	} else {
+		h[key] = fieldValue
+	}
 	return n + 2, false, nil
 }
 

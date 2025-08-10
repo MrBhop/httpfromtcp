@@ -76,4 +76,16 @@ func TestHeaders(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, 0, n)
 	require.False(t, done)
+
+	// Test: Valid single header with existing value
+	headers = NewHeaders()
+	headers["host"] = "localhost:42070"
+	data = []byte("Host: localhost:42069\r\n\r\n")
+	n, done, err = headers.Parse(data)
+	require.NoError(t, err)
+	require.NotNil(t, headers)
+	require.Equal(t, "localhost:42070, localhost:42069", headers["host"])
+	require.Equal(t, 23, n)
+	require.False(t, done)
+
 }
