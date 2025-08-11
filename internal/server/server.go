@@ -5,6 +5,8 @@ import (
 	"log"
 	"net"
 	"sync/atomic"
+
+	"github.com/MrBhop/httpfromtcp/internal/response"
 )
 
 type Server struct {
@@ -48,8 +50,10 @@ func (s *Server) listen() {
 
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
-	conn.Write([]byte("HTTP/1.1 200 OK\r\n" +
-	"Content-Type: text/plain\r\n" +
-	"\r\n" +
-	"Hello World!\n"))
+
+	headers := response.GetDefaultHeaders(0)
+	response.WriteStatusLine(conn, response.StatusOK)
+	if err := response.WriteHeaders(conn, headers); err != nil {
+		log.Printf("Error writing response headers: %s", err)
+	}
 }

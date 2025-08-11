@@ -17,6 +17,15 @@ func (h Headers) Get(key string) (string, bool) {
 	return val, exists
 }
 
+func (h Headers) Add(key, value string) {
+	key = strings.ToLower(key)
+	if _, exists := h[key]; exists {
+		h[key] += ", " + value
+		return
+	}
+	h[key] = value
+}
+
 func NewHeaders() Headers {
 	return Headers{}
 }
@@ -33,7 +42,7 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	line := data[:n]
 	parts := bytes.SplitN(line, []byte(":"), 2)
 
-	key := strings.ToLower(string(parts[0]))
+	key := string(parts[0])
 	if key != strings.TrimRight(key, " ") {
 		return 0, false, fmt.Errorf("Whitespace after the key is not allowed.")
 	}
@@ -48,11 +57,7 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 		return 0, false, fmt.Errorf("Whitespace in the field value is not allowed.")
 	}
 
-	if _, exists := h[key]; exists {
-		h[key] += ", " + fieldValue
-	} else {
-		h[key] = fieldValue
-	}
+	h.Add(key, fieldValue)
 	return n + 2, false, nil
 }
 
