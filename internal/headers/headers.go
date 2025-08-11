@@ -26,6 +26,11 @@ func (h Headers) Add(key, value string) {
 	h[key] = value
 }
 
+func (h Headers) Set(key, value string) {
+	key = strings.ToLower(key)
+	h[key] = value
+}
+
 func NewHeaders() Headers {
 	return Headers{}
 }

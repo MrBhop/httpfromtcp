@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"fmt"
 	"log"
 	"net"
@@ -55,30 +54,14 @@ func (s *Server) listen() {
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
 
+	response := response.Writer{
+		Connection: conn,
+	}
+
 	request, err := request.RequestFromReader(conn)
 	if err != nil {
-		handlerError := &HandlerError{
-			StatusCode: response.StatusBadRequest,
-			Message: err.Error(),
-		}
-		handlerError.Write(conn)
-		return
-	}
-	outputBuffer := &bytes.Buffer{}
-
-	if err := s.handler(outputBuffer, request); err != nil {
-		err.Write(conn)
-		return
+		WriteConnectionError(&response, err.Error())
 	}
 
-	headers := response.GetDefaultHeaders(outputBuffer.Len())
-	if err := response.WriteStatusLine(conn, response.StatusOK); err != nil {
-		log.Printf("Error writing status line: %s", err)
-	}
-	if err := response.WriteHeaders(conn, headers); err != nil {
-		log.Printf("Error writing response headers: %s", err)
-	}
-	if _, err := conn.Write(outputBuffer.Bytes()); err != nil {
-		log.Printf("Error writing response body: %s", err)
-	}
+	s.handler(&response, request)
 }
