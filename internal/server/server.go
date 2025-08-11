@@ -1,26 +1,30 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"net"
 	"sync/atomic"
 
+	"github.com/MrBhop/httpfromtcp/internal/request"
 	"github.com/MrBhop/httpfromtcp/internal/response"
 )
 
 type Server struct {
 	closed atomic.Bool
 	listener net.Listener
+	handler Handler
 }
 
-func Serve(port int) (*Server, error) {
+func Serve(port int, handlerFunc Handler) (*Server, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return nil, err
 	}
 	s := &Server{
 		listener: listener,
+		handler: handlerFunc,
 	}
 	go s.listen()
 	return s, nil
@@ -51,9 +55,30 @@ func (s *Server) listen() {
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
 
-	headers := response.GetDefaultHeaders(0)
-	response.WriteStatusLine(conn, response.StatusOK)
+	request, err := request.RequestFromReader(conn)
+	if err != nil {
+		handlerError := &HandlerError{
+			StatusCode: response.StatusBadRequest,
+			Message: err.Error(),
+		}
+		handlerError.Write(conn)
+		return
+	}
+	outputBuffer := &bytes.Buffer{}
+
+	if err := s.handler(outputBuffer, request); err != nil {
+		err.Write(conn)
+		return
+	}
+
+	headers := response.GetDefaultHeaders(outputBuffer.Len())
+	if err := response.WriteStatusLine(conn, response.StatusOK); err != nil {
+		log.Printf("Error writing status line: %s", err)
+	}
 	if err := response.WriteHeaders(conn, headers); err != nil {
 		log.Printf("Error writing response headers: %s", err)
+	}
+	if _, err := conn.Write(outputBuffer.Bytes()); err != nil {
+		log.Printf("Error writing response body: %s", err)
 	}
 }

@@ -1,18 +1,36 @@
 package main
 
 import (
+	"io"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/MrBhop/httpfromtcp/internal/request"
 	"github.com/MrBhop/httpfromtcp/internal/server"
 )
 
 const port = 42069
 
 func main() {
-	server, err := server.Serve(port)
+	handlerFunc := func(w io.Writer, request *request.Request) *server.HandlerError {
+		switch request.RequestLine.RequestTarget {
+		case "/yourproblem":
+			return &server.HandlerError{
+				StatusCode: 400,
+				Message: "Your problem is not my problem\n",
+			}
+		case "/myproblem":
+			return &server.HandlerError{
+				StatusCode: 500,
+				Message: "Woopsie, my bad\n",
+			}
+		}
+		w.Write([]byte("All good, frfr\n"))
+		return nil
+	}
+	server, err := server.Serve(port, handlerFunc)
 	if err != nil {
 		log.Fatalf("Error starting server: %v", err)
 	}
