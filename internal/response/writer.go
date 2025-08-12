@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/MrBhop/httpfromtcp/internal/constants"
 	"github.com/MrBhop/httpfromtcp/internal/headers"
 )
 
@@ -47,4 +48,22 @@ func (w *Writer) WriteBody(p []byte) (int, error) {
 		return 0, fmt.Errorf("Invalid operation in the current state")
 	}
 	return w.Connection.Write(p)
+}
+
+func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
+	crlfBytes := []byte(constants.CrLf)
+	crlfLength := len(crlfBytes)
+	bodyLength := len(p) + crlfLength
+	bodyLengthLine := fmt.Appendf(nil, "%x%s", bodyLength, crlfBytes)
+
+	completeBodyChunk := make([]byte, 0, len(bodyLengthLine) + bodyLength)
+	completeBodyChunk = append(completeBodyChunk, bodyLengthLine...)
+	completeBodyChunk = append(completeBodyChunk, p...)
+	completeBodyChunk = append(completeBodyChunk, crlfBytes...)
+	return w.WriteBody(completeBodyChunk)
+}
+
+func (w *Writer) WriteChunkedBodyDone() error {
+	_, err := w.WriteChunkedBody([]byte{})
+	return err
 }
