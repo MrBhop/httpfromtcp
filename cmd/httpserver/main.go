@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/MrBhop/httpfromtcp/internal/headers"
 	"github.com/MrBhop/httpfromtcp/internal/request"
 	"github.com/MrBhop/httpfromtcp/internal/response"
 	"github.com/MrBhop/httpfromtcp/internal/server"
@@ -48,6 +51,7 @@ func handlerFunc(w *response.Writer, request *request.Request) {
 }
 
 func httpBinHandler(w *response.Writer, target string) {
+	fmt.Println("proxying to httpbin.org")
 	nResponsesString := strings.TrimPrefix(target, "/httpbin/")
 
 	resp, err := http.Get(fmt.Sprintf("https://httpbin.org/%s", nResponsesString))
@@ -57,34 +61,50 @@ func httpBinHandler(w *response.Writer, target string) {
 	}
 	defer resp.Body.Close()
 
-	headers := response.GetDefaultHeaders(0)
-	headers.Remove("Content-Length")
-	headers.Set("Content-Type", resp.Header.Get("Content-Type"))
-	headers.Set("Transfer-Encoding", "chunked")
+	h := response.GetDefaultHeaders(0)
+	h.Remove("Content-Length")
+	h.Set("Content-Type", resp.Header.Get("Content-Type"))
+	h.Set("Transfer-Encoding", "chunked")
+	h.Set("Trailer", "X-Content-Sha256, X-Content-Length")
 
 	w.WriteStatusLine(response.StatusOK)
-	w.WriteHeaders(headers)
+	w.WriteHeaders(h)
 
+	buffer := make([]byte, 32)
+	bufferLengthUsed := 0
 	for {
-		buffer := make([]byte, 1024)
-		n, err := resp.Body.Read(buffer)
+		if bufferLengthUsed == len(buffer) {
+			newBuffer := make([]byte, bufferLengthUsed * 2)
+			copy(newBuffer, buffer)
+			buffer = newBuffer
+		}
+		n, err := resp.Body.Read(buffer[bufferLengthUsed:])
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				log.Printf("Reached end of file after %d bytes\n", bufferLengthUsed + n)
 				break
 			}
-			myProblemHandler(w)
-			return
+			log.Printf("Error reading from forwarded request: %s", err)
+			break
 		}
-		fmt.Printf("Read %d bytes\n", n)
-		fmt.Printf("Bytes:\n%s\n", buffer)
+		fmt.Println("Read", n, "bytes.", "Total bytes read: ", bufferLengthUsed + n)
+		fmt.Printf("Bytes Read:\n%s\n", buffer[bufferLengthUsed:][:n])
 
-		if _, err := w.WriteChunkedBody(buffer[:n]); err != nil {
+		if _, err := w.WriteChunkedBody(buffer[bufferLengthUsed:][:n]); err != nil {
 			log.Println(err)
+			break
 		}
+		bufferLengthUsed += n
 	}
-	if err := w.WriteChunkedBodyDone(); err != nil {
+	if err := w.WriteChunkedBodyDone(false); err != nil {
 		log.Println(err)
 	}
+
+	checksum := sha256.Sum256(buffer[:bufferLengthUsed])
+	trailers := headers.NewHeaders()
+	trailers.Set("X-Content-SHA256", hex.EncodeToString(checksum[:]))
+	trailers.Set("X-Content-Length", fmt.Sprintf("%d", bufferLengthUsed))
+	w.WriteTrailers(trailers)
 }
 
 func yourProblemHandler(w *response.Writer) {

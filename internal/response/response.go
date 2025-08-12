@@ -30,7 +30,7 @@ func GetStatusLine(statusCode StatusCode) []byte {
 		return []byte{}
 	}
 
-	return fmt.Appendf([]byte{}, "HTTP/1.1 %d %s", statusCode, statusLine)
+	return fmt.Appendf([]byte{}, "HTTP/1.1 %d %s%s", statusCode, statusLine, constants.CrLf)
 }
 
 func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
