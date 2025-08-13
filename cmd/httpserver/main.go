@@ -41,13 +41,16 @@ func handlerFunc(w *response.Writer, request *request.Request) {
 		yourProblemHandler(w)
 	case "/myproblem":
 		myProblemHandler(w)
-	default:
-		if strings.HasPrefix(request.RequestLine.RequestTarget, "/httpbin/") {
-			httpBinHandler(w, request.RequestLine.RequestTarget)
-			return
-		}
-		okHandler(w)
 	}
+	if strings.HasPrefix(request.RequestLine.RequestTarget, "/httpbin/") {
+		httpBinHandler(w, request.RequestLine.RequestTarget)
+		return
+	}
+	if request.RequestLine.RequestTarget == "/video" && request.RequestLine.Method == "GET" {
+		videoHandler(w)
+		return
+	}
+	okHandler(w)
 }
 
 func httpBinHandler(w *response.Writer, target string) {
@@ -105,6 +108,20 @@ func httpBinHandler(w *response.Writer, target string) {
 	trailers.Set("X-Content-SHA256", hex.EncodeToString(checksum[:]))
 	trailers.Set("X-Content-Length", fmt.Sprintf("%d", bufferLengthUsed))
 	w.WriteTrailers(trailers)
+}
+
+func videoHandler(w *response.Writer) {
+	video, err := os.ReadFile("assets/vim.mp4")
+	if err != nil {
+		log.Printf("Error opening video file: %s", err)
+		myProblemHandler(w)
+		return
+	}
+	h := response.GetDefaultHeaders(len(video))
+	h.Set("Content-Type", "video/mp4")
+	w.WriteStatusLine(response.StatusOK)
+	w.WriteHeaders(h)
+	w.WriteBody(video)
 }
 
 func yourProblemHandler(w *response.Writer) {
